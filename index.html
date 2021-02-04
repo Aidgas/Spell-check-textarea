@@ -1,0 +1,741 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Spell check</title>
+
+  <link rel="stylesheet" href="/css/global.css?v=1.0">
+  <script src='/js/jquery.min.js'></script>
+  
+  <script>
+(function (factory) {
+        'use strict';
+        if (typeof define === 'function' && define.amd) {
+            // AMD. Register as an anonymous module.
+            define(['jquery'], factory);
+        } else if (typeof module === 'object' && module.exports) {
+            // Node/CommonJS
+            module.exports = factory(require('jquery'));
+        } else {
+            // Browser globals
+            factory(jQuery);
+        }
+}(function ($) {
+  'use strict';
+  var caretClass   = 'textarea-helper-caret'
+    , dataKey      = 'textarea-helper'
+
+    // Styles that could influence size of the mirrored element.
+    , mirrorStyles = [ 
+                       // Box Styles.
+                       'box-sizing', 'height', 'width', 'padding-bottom'
+                     , 'padding-left', 'padding-right', 'padding-top'
+  
+                       // Font stuff.
+                     //, 'font-family', 'font-size', 'font-style' 
+                     //, 'font-variant', 'font-weight'
+  
+                       // Spacing etc.
+                     , 'word-spacing', 'letter-spacing', 'line-height'
+                     , 'text-decoration', 'text-indent', 'text-transform' 
+                     
+                      // The direction.
+                     , 'direction'
+                     ];
+
+  var TextareaHelper = function (elem) {
+    if (elem.nodeName.toLowerCase() !== 'textarea') return;
+    this.$text = $(elem);
+    this.$mirror = $('<div/>').css({ 'position'    : 'absolute'
+                                   , 'overflow'    : 'auto'
+                                   , 'white-space' : 'pre-wrap'
+                                   //, 'word-wrap'   : 'break-word'
+                                   , 'top'         : 0
+                                   , 'left'        : -9999
+                                   , 'padding'     : '6px'
+                                   , 'border'      : '2px solid'
+                                   , 'font'        : '14px/26px "Open Sans",sans-serif'
+                                   , 'z-index'     : '-80001'
+                                   , 'color'       : '#FF0000'
+                                   }).insertAfter(this.$text);
+  };
+
+  (function () {
+    this.update = function () {
+
+      // Copy styles.
+      var styles = {};
+      for (var i = 0, style; style = mirrorStyles[i]; i++) {
+        styles[style] = this.$text.css(style);
+      }
+      this.$mirror.css(styles).empty();
+      
+      // Update content and insert caret.
+      var caretPos = this.getOriginalCaretPos();
+      
+      //if( need_end_word === true )
+      {
+          var text = $('#interim_response_txt').val();
+        
+          var len = text.length;
+          var rx_space = new RegExp('[\\s\\t\\r\\n\\-\\.\\,\\:\\"\\—]', "");
+          var rx_non_space = new RegExp('[^\\s\\t\\r\\n\\-\\.\\,\\:\\"\\—]', "");
+          var find_ok = false;
+          var new_pos = caretPos - 1;
+          
+          while( new_pos < len && rx_non_space.test( text[ new_pos ] ) )
+          {
+              new_pos += 1;
+              find_ok = true;
+              
+              if( rx_space.test( text[new_pos] ) )
+              { break; }
+          }
+          
+          
+          if( find_ok )
+          {
+              caretPos = new_pos;
+          }
+      }
+      
+      var str      = this.$text.val()
+        , pre      = document.createTextNode(str.substring(0, caretPos))
+        , post     = document.createTextNode(str.substring(caretPos))
+        , $car     = $('<span/>').addClass(caretClass).css('position', 'absolute').html('&nbsp;');
+      this.$mirror.append(pre, $car, post)
+                  .scrollTop(this.$text.scrollTop());
+    };
+
+    this.destroy = function () {
+      this.$mirror.remove();
+      this.$text.removeData(dataKey);
+      return null;
+    };
+
+    this.caretPos = function () {
+      this.update();
+      
+      var $caret = this.$mirror.find('.' + caretClass)
+        , pos    = $caret.position();
+        
+      if (this.$text.css('direction') === 'rtl')
+      { 
+        pos.right = this.$mirror.innerWidth() - pos.left - $caret.width();
+        pos.left = 'auto';
+      }
+
+      return pos;
+    };
+
+    this.height = function () {
+      this.update();
+      this.$mirror.css('height', '');
+      return this.$mirror.height();
+    };
+
+    // XBrowser caret position
+    // Adapted from http://stackoverflow.com/questions/263743/how-to-get-caret-position-in-textarea
+    this.getOriginalCaretPos = function () {
+      var text = this.$text[0];
+      if (text.selectionStart) {
+        return text.selectionStart;
+      } else if (document.selection) {
+        text.focus();
+        var r = document.selection.createRange();
+        if (r == null) {
+          return 0;
+        }
+        var re = text.createTextRange()
+          , rc = re.duplicate();
+        re.moveToBookmark(r.getBookmark());
+        rc.setEndPoint('EndToStart', re);
+        return rc.text.length;
+      } 
+      return 0;
+    };
+
+  }).call(TextareaHelper.prototype);
+  
+  $.fn.textareaHelper = function (method) {
+    this.each(function () {
+      var $this    = $(this)
+        , instance = $this.data(dataKey);
+      if (!instance) {
+        instance = new TextareaHelper(this);
+        $this.data(dataKey, instance);
+      }
+    });
+    if (method) {
+      var instance = this.first().data(dataKey);
+      return instance[method]();
+    } else {
+      return this;
+    }
+  };
+
+}));
+    
+    (function( textAreaCheckSpell, $, undefined )
+    {
+        var ok_keyup     = true;
+        var rx           = new RegExp("[^a-zA-Zа-яА-Я]", "");
+        var rx_ru        = new RegExp("[а-яА-Я]+", "");
+        var rx_en        = new RegExp("[a-zA-Z]+", "");
+        var rx_is_digit  = new RegExp("^\\d+$", "");
+        var last_find_word = null;
+        var sugession_select_index = 0;
+        var check_text_all_last_list = [];
+
+        function setCaretPosition(elemId, caretPos) {
+        
+            var elem = document.getElementById(elemId);
+
+            if(elem != null) {
+                if(elem.createTextRange) {
+                    var range = elem.createTextRange();
+                    range.move('character', caretPos);
+                    range.select();
+                }
+                else {
+                    if(elem.selectionStart) {
+                        elem.focus();
+                        elem.setSelectionRange(caretPos, caretPos);
+                    }
+                    else
+                        elem.focus();
+                }
+            }
+        }
+
+        function set_word() {
+            $('#show_list_words > span').each(function(index)
+            {
+                if(index == sugession_select_index)
+                {
+                    var s = $.trim( $(this).html() );
+
+                    var old_text = $('#interim_response_txt').val();
+
+                    var new_text = old_text.substring(0, last_find_word[1]);
+                        new_text += s;
+                        new_text += old_text.substring(last_find_word[2]);
+
+                    $('#interim_response_txt').val(new_text);
+                    setCaretPosition('editor', last_find_word[1] + s.length);
+                    //handleInput();
+                    handleInput2( check_text_all_last_list );
+
+                    check_text_all();
+
+                    $('#show_list_words').hide();
+                    sugession_is_show = false;
+                    return false;
+                }
+            });
+        }
+
+        function draw_select_suggesion(index)
+        {
+            $('#show_list_words > span').each(function(){ $(this).removeClass('select'); });
+            var len = $('#show_list_words > span').length;
+
+            sugession_select_index = index;
+
+            if( sugession_select_index > len -1  )
+            {
+                  sugession_select_index = len - 1;
+            }
+            else if( sugession_select_index < 0 )
+            {
+                  sugession_select_index = 0;
+            }
+
+            $('#show_list_words > span').each(function(index)
+            {
+                if(index == sugession_select_index)
+                {
+                      $(this).addClass('select');
+                      return false;
+                }
+            });
+        }
+
+	function check_text_all()
+        {
+            var text = $('#interim_response_txt').val();
+
+            $.ajax({
+                url: "/ajax/",
+                type: "POST",
+                dataType: "json",
+                data: {
+                    'cmd': 'check_text',
+                    'text':text
+                },
+                error: function(msg)
+                {
+                    console.log(msg);
+                },
+                success: function(msg)
+                {
+                    check_text_all_last_list = msg;
+                    handleInput2( check_text_all_last_list );
+                }
+            });
+        }
+
+        function request_suggesion(w) {
+            var w_original = w;
+
+            if( w.length < 3 ) {
+              return;
+            }
+
+            request_txt_1 = "";
+            request_txt_2 = "";
+
+            var i1 = 0, i2 = w.length;
+
+            while( rx.test(w.charAt(i1))) {
+                request_txt_1 += w.charAt(i1);
+                i1 += 1;
+            }
+
+            while(i2 - 1 >= 0 && rx.test( w.charAt(i2 - 1) )) {
+                i2 -= 1;
+            }
+
+            request_txt_2 = w.substring(i2);
+
+            w = w.substring(i1, i2);
+
+            if( rx_is_digit.test(w) ) {
+                return;
+            }
+
+            lang = 'ru';
+            if( ! rx_ru.test(w) ) {
+                lang = 'en';
+            }
+
+            $.ajax({
+                  url: "/ajax/",
+                  type: "POST",
+                  dataType: "json",
+                  data: {
+                        'cmd': 'check_word',
+                        'lang': lang,
+                        'w': w
+                  },
+                  error: function(msg)
+                  {
+                    console.log(msg);
+                  },
+                  success: function(msg)
+                  {
+                        if( msg[0] == 2 /*|| msg[0] == 1*/ )  {
+                            var ss = "";
+
+                            if( msg[1].length > 0 )
+                            {
+                               for(var i in msg[1])
+                               {
+                                   ss += "<span onclick='textAreaCheckSpell.onclick_sugession_result(this)'>"+ request_txt_1 + msg[1][i] + request_txt_2 +"</span>";
+                               }
+
+                                last_count_sugession = msg[1].length;
+                                $('#show_list_words').html(ss);
+
+                                $('#interim_response_txt').textareaHelper('update');
+                                var info_pos = $('#interim_response_txt').textareaHelper('caretPos');
+                                
+                                var p0 = $('#interim_response_txt').offset();
+
+                                sugession_select_index = -1;
+
+                               $('#show_list_words').css({ 'left': p0.left + info_pos.left + 1, 'top': p0.top + info_pos.top + 25 });
+                               $('#show_list_words').show();
+                               sugession_is_show = true;
+                            }
+                            else
+                            {
+                               $('#show_list_words').hide();
+                               sugession_is_show = false;
+                            }
+                        }
+                        else if( msg[0] == 1 )
+                        {
+                            $('#show_list_words').hide();
+                            sugession_is_show = false;
+                        }
+                  }
+            });
+        }
+
+        function getLastWord(current_pos, need_end_word) {
+            
+            var text = $('#interim_response_txt').val();
+
+            var rx_space = new RegExp('[\\s\\t\\r\\n\\-\\.\\,\\:\\"\\—]', "");
+
+            var i = 0;
+
+            if( need_end_word === true ) {
+                
+                var len = text.length;
+                var rx_non_space = new RegExp('[^\\s\\t\\r\\n\\-\\.\\,\\:\\"\\—]', "");
+                var find_ok = false;
+                var new_pos = current_pos - 1;
+
+                while( new_pos < len && rx_non_space.test( text[ new_pos ] ) ) {
+                    new_pos += 1;
+                    find_ok = true;
+
+                    if( rx_space.test( text[new_pos] ) )
+                    { break; }
+                }
+
+                if( find_ok )
+                {
+                    current_pos = new_pos;
+                }
+            }
+
+            i = current_pos - 1;
+
+            while( i >= 0 && ! rx_space.test( text[i] ) )
+            {
+                i -= 1;
+            }
+
+            var word = text.substring(i + 1, current_pos);
+
+            result = [word, i + 1, current_pos];
+
+            return result;
+        }
+
+        textAreaCheckSpell.onclick_sugession_result = function(obj)
+        {
+            var s = $.trim( $(obj).html() );
+
+            var old_text = $('#interim_response_txt').val();
+
+            var new_text = old_text.substring(0, last_find_word[1]);
+                new_text += s;
+                new_text += old_text.substring(last_find_word[2]);
+
+            $('#interim_response_txt').val(new_text);
+            setCaretPosition('editor', last_find_word[1] + s.length);
+            //handleInput();
+            handleInput2( check_text_all_last_list );
+
+            check_text_all();
+
+            $('#show_list_words').hide();
+            sugession_is_show = false;
+        }
+
+        function check_pos()
+        {
+            var cursorPosition = $('#interim_response_txt').prop("selectionStart");
+
+            var res         = getLastWord(cursorPosition, true);
+            last_find_word  = res;
+
+            if( $.trim(res[0]).length > 0 )
+            {
+                request_suggesion( res[0] );
+            }
+            else
+            {
+                $('#show_list_words').hide();
+                sugession_is_show = false;
+            }
+        }
+        
+        ///----------------
+        // yeah, browser sniffing sucks, but there are browser-specific quirks to handle that are not a matter of feature detection
+        var ua = window.navigator.userAgent.toLowerCase();
+        var isIE = !!ua.match(/msie|trident\/7|edge/);
+        var isWinPhone = ua.indexOf('windows phone') !== -1;
+        var isIOS = !isWinPhone && !!ua.match(/ipad|iphone|ipod/);
+        
+        String.prototype.replaceAll = function(search, replacement) {
+                var target = this;
+                return target.replace(new RegExp(search, 'g'), replacement);
+        };
+        
+        function applyHighlights(text) {
+             text = text
+            .replace(/\n$/g, '\n\n')
+            .replace(/[A-Z].*?\b/g, '<mark>$&</mark>');
+          
+          if (isIE) {
+            // IE wraps whitespace differently in a div vs textarea, this fixes it
+            text = text.replace(/ /g, ' <wbr>');
+          }
+          
+          return text;
+        }
+				
+	function applyHighlights2(text, array_bad_words) {
+            // text = text
+            //.replace(/\n$/g, '\n\n');
+            //.replace(/[A-Z].*?\b/g, '<mark>$&</mark>');
+						
+            for(var i in array_bad_words)
+            {
+                text = text.replaceAll( array_bad_words[i], '<mark>'+ array_bad_words[i] +'</mark>' );
+            }
+          
+          if (isIE) {
+            // IE wraps whitespace differently in a div vs textarea, this fixes it
+            text = text.replace(/ /g, ' <wbr>');
+          }
+          
+          return text;
+        }
+        
+        function handleInput() {
+          var text = $textarea.val();
+					
+          var highlightedText = applyHighlights(text);
+          $highlights.html(highlightedText);
+        }
+				
+	function handleInput2(array_bad_words) {
+            var text = $textarea.val();
+
+            var highlightedText = applyHighlights2(text, array_bad_words);
+            $highlights.html(highlightedText);
+					
+            handleScroll();
+        }
+        
+        function handleScroll() {
+          var scrollTop = $textarea.scrollTop();
+          $backdrop.scrollTop(scrollTop);
+          
+          var scrollLeft = $textarea.scrollLeft();
+          $backdrop.scrollLeft(scrollLeft);  
+        }
+        
+        function fixIOS() {
+          // iOS adds 3px of (unremovable) padding to the left and right of a textarea, so adjust highlights div to match
+          $highlights.css({
+            'padding-left': '+=3px',
+            'padding-right': '+=3px'
+          });
+        }
+        
+        function bindEvents() {
+          $textarea.on({
+            //'input': handleInput,
+            'scroll': handleScroll
+          }); 
+        }
+        
+    //Public Method
+    textAreaCheckSpell.init = function()
+    {
+	$container = $('.container');
+        $backdrop = $('.backdrop');
+        $highlights = $('.highlights');
+        $textarea = $('#interim_response_txt');
+
+        $('#interim_response_txt').textareaHelper();
+        
+        if (isIOS) {
+          fixIOS();
+        }
+        
+        bindEvents();
+        //handleInput();
+        handleInput2( check_text_all_last_list );
+
+        $('#interim_response_txt').focus();
+
+        $('#interim_response_txt').mouseup(function() {
+            check_pos();
+        });
+
+        $('#interim_response_txt').keyup(function(event) {
+            
+            if( ok_keyup )
+            {
+                check_pos();
+                check_text_all();
+            }
+        });
+
+        $('#interim_response_txt').keydown(function(event) {
+            
+            ok_keyup = true;
+
+            if( event.keyCode == 40 ) {
+                draw_select_suggesion( sugession_select_index + 1 );
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                ok_keyup = false;
+                return false;
+            }
+            else if( event.keyCode == 38 ) {
+                draw_select_suggesion( sugession_select_index - 1 );
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                ok_keyup = false;
+                return false;
+            }
+            else if( event.keyCode == 13 )
+            {
+                if( sugession_select_index != -1 )
+                {
+                    set_word();
+
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    ok_keyup = false;
+                    return false;
+                }
+                else
+                {
+                    $('#show_list_words').hide();
+                    sugession_is_show = false;
+                }
+            }
+        });
+
+        $(document).click(function()
+        {
+            $('#show_list_words').hide();
+            sugession_is_show = false;
+            check_text_all();
+        });
+    };
+
+}( window.textAreaCheckSpell = window.textAreaCheckSpell || {}, jQuery ));
+
+$(function() {
+    
+    textAreaCheckSpell.init();
+   
+});
+  </script>
+  <style>
+        .container, .backdrop, textarea {
+          width: 760px;
+          height: 380px;
+        }
+
+        .highlights, textarea {
+          padding: 5px;
+          font: 14px/26px 'Open Sans', sans-serif;
+          letter-spacing: 1px;
+        }
+      
+        .container {
+          display: block;
+          /*margin: 0 auto;*/
+          transform: translateZ(0);
+          -webkit-text-size-adjust: none;
+        }
+
+        .backdrop {
+          position: absolute;
+          z-index: 1;
+          border: 2px solid #685972;
+          background-color: #fff;
+          overflow: auto;
+          pointer-events: none;
+          transition: transform 1s;
+        }
+
+        .highlights {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: transparent;
+        }
+        
+        #interim_response_txt {
+            display: block;
+            position: absolute;
+            z-index: 2;
+            margin: 0;
+            border: 2px solid #f07f2c;
+            border-radius: 0;
+            color: #444;
+            background-color: transparent;
+            overflow: auto;
+            resize: none;
+            transition: transform 1s;
+        }
+
+
+        #interim_response_txt:focus 
+        {
+          outline: none;
+          /*box-shadow: 0 0 0 2px #c6aada;*/
+        }
+        
+        mark {
+            background-color: transparent;
+            border-bottom: 1px solid #ff0000;
+        }
+
+        #show_list_words
+        {
+            display: inline-block;
+            position: absolute;
+            background: #FFF;
+            border: 1px solid #ccc;
+            z-index: 999;
+        }
+
+        #show_list_words span
+        {
+            display: block;
+            color: #000;
+            cursor: pointer;
+            padding: 1px 5px;
+            font: 14px/25px 'Open Sans', sans-serif;
+        }
+
+        #show_list_words span:hover
+        {
+            background-color: #CCC;
+        }
+
+        #show_list_words span.select
+        {
+            background-color: #F78F8F;
+        }
+        
+        #container_c {
+            padding: 25px;
+        }
+  </style>
+</head>
+
+<body>
+  
+     <div id="container_c">
+        <div class="container">
+            <div class="backdrop">
+              <div class="highlights"></div>
+            </div>
+            <textarea id='interim_response_txt' autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+        </div>
+
+        <div id='show_list_words'></div>
+    </div>
+    
+</body>
+</html>
